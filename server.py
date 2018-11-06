@@ -7,26 +7,21 @@ def bin_cutter(data: BitArray, octets=2) -> BitArray:
     return BitArray(bin=data.bin[octets*8:])
 
 
-def bin_to_ascii(data) -> str:
-    labels = []
+def bin_to_ascii(data):
+    labels = ''
     chunk = int(data.bin[0:8], base=2)
-    print(chunk)
     data = bin_cutter(data, 1)
     while chunk != 0:
-        label = []
         for char in range(chunk):
-            print(int(data.bin[0:8], base=2))
-            label.append(chr(int(data.bin[0:8], base=2)))
+            labels += chr(int(data.bin[0:8], base=2))
             data = bin_cutter(data, 1)
         chunk = int(data.bin[0:8], base=2)
         data = bin_cutter(data, 1)
-        labels.append(label)
-    # data = bin_cutter(data, 1)
+        labels += '.' if chunk else ''
     return labels, data
 
 
 class DNSquery:
-
     class Header:
         def __init__(self, data: BitArray):
             self.id = int(data.bin[0:16], base=2)
@@ -49,21 +44,6 @@ class DNSquery:
             self.arcount = data.bin[0:16]
             self.data_rest = bin_cutter(data)
 
-        id: int
-        qr: int
-        opcode: int
-        aa: bool
-        tc: bool
-        rd: bool
-        ra: bool
-        z: int
-        rcode: int
-        qdcount: int
-        ancount: int
-        nscount: int
-        arcount: int
-
-
     class Question:
         def __init__(self, data: BitArray):
             self.labels, data = bin_to_ascii(data)
@@ -71,11 +51,6 @@ class DNSquery:
             data = bin_cutter(data)
             self.qclass = data.bin[0:16]
             self.data_rest = bin_cutter(data)
-            # ascii()
-
-
-
-
 
 
 class MyUDPHandler(socketserver.BaseRequestHandler):
@@ -90,16 +65,13 @@ class MyUDPHandler(socketserver.BaseRequestHandler):
         data = self.request[0].strip()
         socket = self.request[1]
         print("{} wrote:".format(self.client_address[0]))
-        new_data = BitArray(bytes=data, offset=1)
-        # print(new_data.bin)
-        # print(int(new_data.bin[:16], base=2))
-        # print(len(data))
         query = DNSquery
         header = query.Header(data=BitArray(data))
         question = query.Question(data=header.data_rest)
         print(header.__dict__)
         print(question.__dict__)
         socket.sendto(data.upper(), self.client_address)
+
 
 if __name__ == "__main__":
     HOST, PORT = "localhost", 53
