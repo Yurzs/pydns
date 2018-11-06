@@ -1,4 +1,3 @@
-#!/usr/bin/sudo python
 import socketserver
 import binascii
 from bitstring import BitStream, BitArray
