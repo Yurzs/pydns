@@ -7,6 +7,7 @@ from bitstring import BitStream, BitArray
 def bin_cutter(data: BitArray, octets=2) -> BitArray:
     return BitArray(bin=data.bin[octets*8:])
 
+
 def bin_to_ascii(data) -> str:
     labels = []
     chunk = int(data.bin[0:8], base=2)

@@ -1,6 +1,7 @@
 import socket
 import sys
 
+
 HOST, PORT = "localhost", 53
 data = "12354"
 
