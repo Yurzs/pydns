@@ -2,6 +2,7 @@ import socketserver
 from bitstring import BitArray
 import re
 
+
 TYPE = {
     1: 'A',
     2: 'NS',
@@ -56,7 +57,7 @@ def bin_to_ascii(data):
 def object_to_bits(data: object, previous_item: list=None):
     raw_bit_string = ''
     for item in data.__dict__:
-        if re.match('__[A-z]+__', item) or item == 'message_items_length':
+        if re.match('__[A-z_]+__', item):
             continue
         if isinstance(getattr(data, item), str):
             #TODO str to bin with octets prefix
@@ -142,7 +143,7 @@ class Message:
                 self.question = self.Question(data=self.header.data_rest)
         else:
             self.header = self.Header
-        self.message_items_length = self.Length
+        self.__message_items_length__ = self.Length
 
     def reply(self) -> bytes:
         reply_message = Message()
