@@ -1,6 +1,38 @@
 import socketserver
-import binascii
-from bitstring import BitStream, BitArray
+from bitstring import BitArray
+import re
+
+TYPE = {
+    1: 'A',
+    2: 'NS',
+    3: 'MD',
+    4: 'MF',
+    5: 'CNAME',
+    6: 'SOA',
+    7: 'MB',
+    8: 'MG',
+    9: 'MR',
+    10: 'NULL',
+    11: 'WKS',
+    12: 'PTR',
+    13: 'HINFO',
+    14: 'MINFO',
+    15: 'MX',
+    16: 'TXT'
+        }
+
+QTYPE = {
+    252: 'AXFR',
+    253: 'MAILB',
+    254: 'MAILA'
+}
+
+CLASS = {
+    1: 'IN',
+    2: 'CS',
+    3: 'CH',
+    4: 'HS'
+}
 
 
 def bin_cutter(data: BitArray, octets=2) -> BitArray:
@@ -21,36 +53,117 @@ def bin_to_ascii(data):
     return labels, data
 
 
-class DNSquery:
+def object_to_bits(data: object, previous_item: list=None):
+    raw_bit_string = ''
+    for item in data.__dict__:
+        if re.match('__[A-z]+__', item) or item == 'message_items_length':
+            continue
+        if isinstance(getattr(data, item), str):
+            #TODO str to bin with octets prefix
+            pass
+        elif isinstance(getattr(data, item), int):
+            obj = Message().Length
+            for layer in previous_item:
+                obj = getattr(obj, layer)
+            raw_bit_string += str(bin(getattr(data, item))[2:]).zfill(getattr(obj, item))
+        elif hasattr(getattr(data, item), '__class__'):
+            if previous_item:
+                previous_item.append(item)
+            else:
+                previous_item = [item]
+            raw_bit_string += object_to_bits(data=getattr(data, item), previous_item=previous_item)
+    return raw_bit_string
+
+
+class Message:
+    class Length:
+        class Header:
+            id = 16
+            qr = 1
+            opcode = 4
+            aa = 1
+            tc = 1
+            rd = 1
+            ra = 1
+            z = 3
+            rcode = 4
+            qdcount = 16
+            ancount = 16
+            nscount = 16
+            arcount = 16
+        header = Header
+
     class Header:
-        def __init__(self, data: BitArray):
-            self.id = int(data.bin[0:16], base=2)
-            data = bin_cutter(data)
-            self.qr = data.bin[0]
-            self.opcode = data.bin[0:4]
-            self.aa = data.bin[5]
-            self.tc = data.bin[6]
-            self.rd = data.bin[7]
-            self.ra = data.bin[8]
-            self.z = data.bin[9:12]
-            self.rcode = data.bin[12:16]
-            data = bin_cutter(data)
-            self.qdcount = data.bin[0:16]
-            data = bin_cutter(data)
-            self.ancount = data.bin[0:16]
-            data = bin_cutter(data)
-            self.nscount = data.bin[0:16]
-            data = bin_cutter(data)
-            self.arcount = data.bin[0:16]
-            self.data_rest = bin_cutter(data)
+        def __init__(self, data: BitArray=None):
+            if data:
+                self.id = int(data.bin[0:16], base=2)
+                data = bin_cutter(data)
+                self.qr = data.bin[0]
+                self.opcode = int(data.bin[0:4], base=2)
+                self.aa = int(data.bin[5], base=2)
+                self.tc = int(data.bin[6], base=2)
+                self.rd = int(data.bin[7], base=2)
+                self.ra = int(data.bin[8], base=2)
+                self.z = int(data.bin[9:12], base=2)
+                self.rcode = data.bin[12:16]
+                data = bin_cutter(data)
+                self.qdcount = data.bin[0:16]
+                data = bin_cutter(data)
+                self.ancount = data.bin[0:16]
+                data = bin_cutter(data)
+                self.nscount = data.bin[0:16]
+                data = bin_cutter(data)
+                self.arcount = data.bin[0:16]
+                self.data_rest = bin_cutter(data)
 
     class Question:
-        def __init__(self, data: BitArray):
-            self.labels, data = bin_to_ascii(data)
-            self.qtype = data.bin[0:16]
-            data = bin_cutter(data)
-            self.qclass = data.bin[0:16]
-            self.data_rest = bin_cutter(data)
+        def __init__(self, data: BitArray=None):
+            if data:
+                self.labels, data = bin_to_ascii(data)
+                self.qtype = TYPE.get(int(data.bin[0:16], base=2), '*')
+                data = bin_cutter(data)
+                self.qclass = CLASS.get(data.bin[0:16], '*')
+                self.data_rest = bin_cutter(data)
+
+    class Answer:
+        def __init__(self, **kwargs):
+            self.__dict__.update(**kwargs)
+
+    class Authority:
+        pass
+
+    class Additional:
+        pass
+
+    def __init__(self, data: bytes=None):
+        if data:
+            self.header = self.Header(data=BitArray(bytes=data))
+            if self.header.qdcount:
+                self.question = self.Question(data=self.header.data_rest)
+        else:
+            self.header = self.Header
+        self.message_items_length = self.Length
+
+    def reply(self) -> bytes:
+        reply_message = Message()
+        reply_message.header.id = self.header.id
+        reply_message.header.qr = 1
+        reply_message.header.opcode = self.header.opcode
+        reply_message.header.aa = 1
+        reply_message.header.tc = 0
+        reply_message.header.rd = self.header.rd
+        reply_message.header.ra = 0
+        reply_message.header.z = 0
+        reply_message.header.rcode = 2
+        reply_message.header.qdcount = 0
+        reply_message.header.ancount = 0
+        reply_message.header.nscount = 0
+        reply_message.header.arcount = 0
+        reply_message.bit_data = object_to_bits(reply_message)
+        return BitArray(bin=reply_message.bit_data).bytes
+
+
+
 
 
 class MyUDPHandler(socketserver.BaseRequestHandler):
@@ -65,15 +178,14 @@ class MyUDPHandler(socketserver.BaseRequestHandler):
         data = self.request[0].strip()
         socket = self.request[1]
         print("{} wrote:".format(self.client_address[0]))
-        query = DNSquery
-        header = query.Header(data=BitArray(data))
-        question = query.Question(data=header.data_rest)
-        print(header.__dict__)
-        print(question.__dict__)
-        socket.sendto(data.upper(), self.client_address)
+        message = Message(data=data)
+        print(message.header.__dict__)
+        print(message.question.__dict__)
+        print(message.reply())
+        socket.sendto(message.reply(), self.client_address)
 
 
 if __name__ == "__main__":
-    HOST, PORT = "localhost", 53
+    HOST, PORT = "0.0.0.0", 53
     with socketserver.UDPServer((HOST, PORT), MyUDPHandler) as server:
         server.serve_forever()
