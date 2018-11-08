@@ -1,11 +1,11 @@
 from django.db import models
-from server import TYPE, CLASS
+# from server import TYPE, CLASS
 # Create your models here.
 
 
 class SOA(models.Model):
     ttl = models.IntegerField()
-    name = models.TextField()
+    name = models.TextField(unique=True)
     ns = models.TextField()
     email = models.EmailField()
     serial = models.IntegerField()
@@ -21,3 +21,13 @@ class SubDomain(models.Model):
     type = models.IntegerField()
     dns_class = models.IntegerField()
     target = models.TextField()
+
+    def to_dns_dict(self):
+        return {'answer1': {
+                'name': self.name + '.' + self.soa.name,
+                'type': self.type,
+                'class': self.dns_class,
+                'ttl': self.soa.ttl,
+                'rdlength': 4,
+                'rdata': self.target
+            }}
