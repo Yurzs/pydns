@@ -4,26 +4,8 @@ import re
 import pydns
 pydns.setup()
 from DNS.models import *
-
-
-TYPE = {
-    1: 'A',
-    2: 'NS',
-    3: 'MD',
-    4: 'MF',
-    5: 'CNAME',
-    6: 'SOA',
-    7: 'MB',
-    8: 'MG',
-    9: 'MR',
-    10: 'NULL',
-    11: 'WKS',
-    12: 'PTR',
-    13: 'HINFO',
-    14: 'MINFO',
-    15: 'MX',
-    16: 'TXT'
-        }
+import rdata
+from django.db.models.query import QuerySet
 
 QTYPE = {
     252: 'AXFR',
@@ -39,18 +21,32 @@ CLASS = {
 }
 
 
+def queryset_to_dict(query_set):
+    answers = {}
+    for n, item in enumerate(query_set):
+        answers.update({
+            'answer'+ str(n): item.dns_dict})
+    return answers
+
+def soa_to_dict(soa):
+    return {'authority1': soa.dns_dict}
+
 def find_in_db(label,qtype ,qclass):
     previous = None
     root = None
     for domain in reversed(label.split('.')):
         if root:
             try:
-                subdomain = root.subdomain.get(name=domain, type=qtype, dns_class=qclass)
+                subdomain = root.subdomain.filter(name=domain, type=qtype, dns_class=qclass)
+                if not subdomain:
+                    raise SubDomain.DoesNotExist
                 return subdomain
             except SubDomain.DoesNotExist:
                 previous = '.'.join([domain, previous]) if previous else domain
                 try:
-                    subdomain = root.subdomain.get(name=previous, type=qtype, dns_class=qclass)
+                    subdomain = root.subdomain.filter(name=previous, type=qtype, dns_class=qclass)
+                    if not subdomain:
+                        raise SubDomain.DoesNotExist
                     return subdomain
                 except SubDomain.DoesNotExist:
                     continue
@@ -64,31 +60,30 @@ def find_in_db(label,qtype ,qclass):
                 previous = ''
             except SOA.DoesNotExist:
                 continue
-    if not root:
-        return False
-
-
+    return root
 
 
 def bin_cutter(data: BitArray, octets=2) -> BitArray:
     return BitArray(bin=data.bin[octets*8:])
 
-
-def bin_to_ascii(data):
-    labels = ''
-    raw = str(data.bin[0:8])
-    chunk = int(data.bin[0:8], base=2)
-    data = bin_cutter(data, 1)
-    while chunk != 0:
-        for char in range(chunk):
-            raw += data.bin[0:8]
-            labels += chr(int(data.bin[0:8], base=2))
-            data = bin_cutter(data, 1)
-        raw += data.bin[0:8]
-        chunk = int(data.bin[0:8], base=2)
-        data = bin_cutter(data, 1)
-        labels += '.' if chunk else ''
-    return labels, data, raw
+def string_to_bit(data:str, lenght=8) -> str:
+    raw_bit_string = ''
+    if isinstance(data, int):
+        raw_bit_string += str (bin (int (data))[2:]).zfill (lenght)
+    elif re.match (
+            '(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])',
+            data):
+        for n, sub in enumerate (data.split ('.')):
+            sub = int (sub)
+            raw_bit_string += str (bin (int (sub))[2:]).zfill (8)
+    elif re.match('[a-z0-9]+(?:[\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5}(?:[0-9]{1,5})?(\/.*)?$', data):
+        for n, sub in enumerate (data.split ('.')):
+            raw_bit_string += str (bin (int (len (sub)))[2:]).zfill (8)
+            for char in sub:
+                raw_bit_string += str (bin (ord (char))[2:]).zfill (8)
+            if n == len (data.split('.')) - 1:
+                raw_bit_string += str ('').zfill (8)
+    return raw_bit_string
 
 
 def bit_to_obj(data, obj_type):
@@ -107,6 +102,7 @@ def bit_to_obj(data, obj_type):
             string += '.' if chunk else ''
         return string
 
+
 def get_octet_bin_string(data):
     bin_string = ''
     chunk = data.bin[0:8]
@@ -122,48 +118,93 @@ def get_octet_bin_string(data):
     return BitArray(bin=bin_string)
 
 
-def object_to_bits(data: object, previous_item: list=None):
-    raw_bit_string = ''
-    for item in data.__dict__:
-        if re.match('__[A-z_]+__', item) or re.match('_[A-z_]+', item):
-            continue
-        if isinstance(getattr(data, item), list):
-            #TODO str to bin with octets prefix
-            for item in getattr(data, item):
-                if 0 <= int(item) <= 255:
-                    raw_bit_string += str(bin(int(item))[2:]).zfill(8)
-            continue
-        if isinstance(getattr(data, item), str):
-            #TODO str to bin with octets prefix
-            pass
-        elif isinstance(getattr(data, item), int):
-            obj = Message().Length
-            for layer in previous_item:
-                obj = getattr(obj, layer)
-            raw_bit_string += str(bin(getattr(data, item))[2:]).zfill(getattr(obj, item))
-        elif hasattr(getattr(data, item), '__class__'):
-            if previous_item:
-                previous_item.append(item)
-            else:
-                previous_item = [item]
-            raw_bit_string += object_to_bits(data=getattr(data, item), previous_item=previous_item)
-            previous_item = []
-    return raw_bit_string
-
-def get_domain(url):
-    previous = None
-    for subdomain in reversed(url.split('.')):
-        if SOA.objects.filter(name=subdomain):
-            return SOA.objects.get(name=subdomain)
-        if previous:
-            previous = '.'.join([subdomain,previous])
-        else:
-            previous = subdomain
-        if SOA.objects.filter(name=previous):
-            return SOA.objects.get(name=previous)
-    return False
-
 class Message:
+    class Rdata:
+
+        class Cname():
+            def __init__(self, target):
+                self.cname = target
+
+        class Hinfo:
+            def __init__(self, target):
+                self.cpu = target.split('\n')[0]
+                self.os = target.split('\n')[1]
+
+        class Mb:
+            def __init__(self, target):
+                self.madname = target
+
+        class Md:
+            def __init__(self, target):
+                self.madname = target
+
+        class Mf:
+            def __init__(self, target):
+                self.madname = target
+
+        class Mg:
+            def __init__(self, target):
+                self.mgname = target
+
+        class Minfo:
+            def __init__(self, target):
+                self.rmailbx = target.split('\n')[0]
+                self.emailbx = target.split('\n')[1]
+
+        class Mr:
+            def __init__(self, target):
+                self.newname = target
+
+        class Mx:
+            def __init__(self, target):
+                self.preference = int(target.split('\n')[0])
+                self.exchange = target.split('\n')[1]
+
+        class Null:
+            def __init__(self, target):
+                pass
+
+        class Ns:
+            def __init__(self, target):
+                self.nsdname = target
+
+        class Ptr:
+            def __init__(self, target):
+                self.ptrname = target
+
+        class Soa:
+            def __init__(self, soa):
+                #TODO FIX
+                self.mname = soa.name
+                self.rname = soa.email.replace('@','.')
+                self.serial = soa.serial
+                self.refresh = (soa.refresh.hour * 60 + soa.refresh.minute) * 60 + soa.refresh.second
+                self.retry = (soa.retry.hour * 60 + soa.retry.minute) * 60 + soa.retry.second
+                self.expire = (soa.expire.hour * 60 + soa.expire.minute) * 60 + soa.expire.second
+                self.minimum = soa.ttl
+
+
+        class Txt:
+            def __init__(self, target):
+                self.txt_data = target
+
+        class A:
+            def __init__(self, target):
+                self.address = target
+
+
+        class Wks:
+            #TODO FIX THIS
+            def __init__(self, target):
+                self.address = target
+                self.protocol = target
+                self.bitmap = target
+
+        class InAddrArpa:
+            # TODO FIX THIS
+            def __init__(self, target):
+                self.address = target
+
     class Length:
         class Header:
             id = 16
@@ -198,6 +239,71 @@ class Message:
             rdlength = 16
             rdata = 8*4
         authority = Answer
+
+        class Additional:
+            name = 16
+            type = 16
+            cls = 16
+            ttl = 32
+            rdlength = 16
+            rdata = 8*4
+        additional = Additional
+
+        class Rdata:
+            class Cname ():
+                pass
+
+            class Hinfo:
+                pass
+
+            class Mb:
+                pass
+
+            class Md:
+                pass
+
+            class Mf:
+                pass
+
+            class Mg:
+                pass
+
+            class Minfo:
+                pass
+
+            class Mr:
+                pass
+
+            class Mx:
+                pass
+
+            class Null:
+                pass
+
+            class Ns:
+                pass
+
+            class Ptr:
+                pass
+
+            class Soa:
+                serial = 32
+                refresh = 32
+                retry = 32
+                expire = 32
+                minimum = 32
+
+            class Txt:
+                pass
+
+            class A:
+                pass
+
+            class Wks:
+                protocol = 8
+
+            class InAddrArpa:
+                pass
 
     class Header:
         def __init__(self, data: BitArray=None):
@@ -265,7 +371,6 @@ class Message:
         else:
             self.header = self.Header
         self.__message_items_length__ = self.Length
-        # self.answer = self.Answer()
 
     def to_dict(self):
         result = {}
@@ -286,14 +391,37 @@ class Message:
                 if re.match('[A-z]{2,15}[0-9]{1,5}', item):
                     check_item = re.findall('[A-z]{3,15}', item.capitalize())[0]
                 else:
-                    check_item = item
+                    check_item = item.capitalize()
                 if getattr(self, check_item):
                     self.__dict__.update({item: getattr(self, check_item)()})
                     subclass = self.__getattribute__(item)
                     subclass.__dict__.update(**data_dict[item])
                     subclass_dict = subclass.__dict__.copy()
                     for subitem in subclass.__dict__:
-                        if isinstance(subclass.__dict__.get(subitem), str):
+                        if subitem == 'rdata':
+                            raw_bit_string = ''
+                            data = rdata.TYPE.get(subclass_dict.get('type'))
+                            if data.__name__.upper() == 'SOA':
+                                data = data(subclass_dict[subitem])
+                                for item in data.__dict__:
+                                    try:
+                                        length = getattr(getattr(Message.Length.Rdata,data.__class__.__name__.capitalize ()),
+                                                         item)
+                                    except AttributeError:
+                                        length =  8
+                                    raw_bit_string += string_to_bit(data.__dict__[item], length)
+                            else:
+                                data = data(subclass_dict.get(subitem))
+                                for item in data.__dict__:
+                                    try:
+                                        length = getattr(getattr(Message.Length.Rdata,data.__class__.__name__.capitalize ()),
+                                                         item)
+                                    except AttributeError:
+                                        length =  8
+                                    raw_bit_string += string_to_bit (data.__dict__[item], length)
+                            subclass_dict.update({'_rdlength': str(bin(int(len(raw_bit_string)/8))[2:]).zfill(16)})
+                            subclass_dict.update({'_' + subitem: raw_bit_string})
+                        elif isinstance(subclass.__dict__.get(subitem), str):
                             raw_bit_string = ''
                             for n, sub in enumerate(subclass_dict[subitem].split('.')):
                                 try:
@@ -309,12 +437,19 @@ class Message:
                         elif isinstance(subclass.__dict__.get(subitem), int):
                             try:
                                 lenght = getattr(getattr(Message.Length(), check_item), subitem)
-                            except:
+                            except AttributeError:
                                 lenght = 16
                             subclass_dict.update({'_' + subitem: str(bin(subclass.__dict__.get(subitem))[2:]).zfill(lenght)})
                     subclass.__dict__.update(**subclass_dict)
             except Exception as e:
-                print(e)
+                print('error :' + e)
+        self.header._ancount = str (
+            bin (len ([item for item in self.__dict__ if re.match ('answer[0-9]{1,5}', item)]))[2:]).zfill (16)
+        self.header._nscount = str (
+            bin (len ([item for item in self.__dict__ if re.match ('authority[0-9]{1,5}', item)]))[2:]).zfill (16)
+        self.header._arcount = str (
+            bin (len ([item for item in self.__dict__ if re.match ('additional[0-9]{1,5}', item)]))[2:]).zfill (16)
+        self.header._qr = '1' if int(self.header._ancount) or int(self.header._nscount) or int(self.header._arcount) else '0'
         return self.to_dict()
 
 
@@ -334,26 +469,18 @@ class Message:
         return bin_string
 
 
-
-
-
-class MyUDPHandler(socketserver.BaseRequestHandler):
-    #TODO AutomateHeader
-    #TODO Add RDATA types
+class DNSudpHandler(socketserver.BaseRequestHandler):
     def handle(self):
         data = self.request[0].strip()
         socket = self.request[1]
-        print("{} wrote:".format(self.client_address[0]))
         message = Message(data=data)
+        print ("{} requested: {}".format (self.client_address[0], message.question.labels))
         dns_result_dict = find_in_db(message.question.labels, message.question.qtype,  message.question.qclass)
-        if dns_result_dict:
-            dns_result_dict = dns_result_dict.to_dns_dict()
-            message.header._qr = '1'
-            message.header._ancount = '0000000000000001'
-            message.header._arcount = '0000000000000000'
+        if isinstance(dns_result_dict, QuerySet):
+            dns_result_dict = queryset_to_dict(dns_result_dict)
+        elif isinstance(dns_result_dict, SOA):
+            dns_result_dict = soa_to_dict(dns_result_dict)
         else:
-            message.header._qr = '1'
-            message.header._arcount = '0000000000000000'
             dns_result_dict = {}
         message.from_dict(dns_result_dict)
         socket.sendto(BitArray(bin=message.to_bin()).bytes, self.client_address)
@@ -361,5 +488,5 @@ class MyUDPHandler(socketserver.BaseRequestHandler):
 
 if __name__ == "__main__":
     HOST, PORT = "0.0.0.0", 53
-    with socketserver.UDPServer((HOST, PORT), MyUDPHandler) as server:
+    with socketserver.UDPServer((HOST, PORT), DNSudpHandler) as server:
         server.serve_forever()
