@@ -5,7 +5,7 @@ from django.db import models
 
 
 class SOA(models.Model):
-    ttl = models.IntegerField()
+    ttl = models.TimeField()
     name = models.TextField(unique=True)
     ns = models.TextField()
     email = models.EmailField()
@@ -47,10 +47,10 @@ class SubDomain(models.Model):
     @property
     def dns_dict(self):
         return {
-                'name': self.name + '.' + self.soa.name,
+                'name': self.name + '.' + self.soa.name if not self.name == '@' else self.soa.name,
                 'type': self.type,
                 'class': self.dns_class,
-                'ttl': self.soa.ttl,
+                'ttl': (self.soa.ttl.hour * 60 + self.soa.ttl.minute) * 60 + self.soa.ttl.second,
                 'rdlength': 4,
                 'rdata': self.target
             }

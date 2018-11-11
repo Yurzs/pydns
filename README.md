@@ -15,6 +15,8 @@ Managed by Django ORM
 
 - [ ] Reversed zone
 
+- [ ] IPv6
+ 
 - [ ] Truncation
 
 - [ ] TCP Server

@@ -1,4 +1,4 @@
-from server import Message
+from dns_objects import Message
 
 TYPE = {
     1: Message.Rdata.A,
@@ -20,3 +20,16 @@ TYPE = {
         }
 
 
+
+QTYPE = {
+    252: 'AXFR',
+    253: 'MAILB',
+    254: 'MAILA'
+}
+
+CLASS = {
+    1: 'IN',
+    2: 'CS',
+    3: 'CH',
+    4: 'HS'
+}
