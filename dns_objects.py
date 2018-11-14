@@ -48,7 +48,8 @@ class int128(int):
 class local_str(str):
     @property
     def binary(self):
-        return str(bin(len([str(bin(ord(char))[2:]).zfill(8) for char in self]))[2:]).zfill(8) + ''.join([str(bin(ord(char))[2:]).zfill(8) for char in self])
+        return str(bin(len([str(bin(ord(char))[2:]).zfill(8) for char in self]))[2:]).zfill(8) + \
+               ''.join([str(bin(ord(char))[2:]).zfill(8) for char in self])
 
 class IpAddress(str):
     @property
@@ -217,7 +218,7 @@ class Message:
             def __init__(self, soa):
                 #TODO FIX
                 self.mname = UrlAddress(soa.ns)
-                self.rname = UrlAddress(soa.email.replace('@','.'))
+                self.rname = UrlAddress(soa.email.replace('@', '.'))
                 self.serial = int32(soa.serial)
                 self.refresh = int32((soa.refresh.hour * 60 + soa.refresh.minute) * 60 + soa.refresh.second)
                 self.retry = int32((soa.retry.hour * 60 + soa.retry.minute) * 60 + soa.retry.second)
@@ -342,10 +343,7 @@ class Message:
         self.header.arcount = int16(len ([item for item in self.__dict__ if re.match ('additional[0-9]{1,5}', item)]))
         self.header.nscount = int16(len ([item for item in self.__dict__ if re.match ('authority[0-9]{1,5}', item)]))
         self.header.ancount = int16(len ([item for item in self.__dict__ if re.match ('answer[0-9]{1,5}', item)]))
-        self.header.qr = int1(1) if self.header.ancount \
-                              or self.header.nscount \
-                              or self.header.arcount \
-            else int1(0)
+        self.header.qr = int1(1) if self.header.ancount or self.header.nscount or self.header.arcount else int1(0)
         return True
 
     def compose(self):

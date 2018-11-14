@@ -115,7 +115,6 @@ def attr_to_bin_string(item, url_dict, octet_counter):
     :return: BitArray with binary string
     """
     from dns_objects import UrlAddress, Message
-    import rdata
     bin_string = ''
     length_octet = False
     for n, subitem in enumerate(item.__dict__):
@@ -140,6 +139,11 @@ def attr_to_bin_string(item, url_dict, octet_counter):
 
 
 def decode_url(raw_bin_data: BitArray):
+    """
+    Decodes url from binary string
+    :param raw_bin_data:
+    :return:
+    """
     url = []
     length_octet = raw_bin_data.bin[0:8]
     raw_bin_data = bin_cutter(raw_bin_data, 1)

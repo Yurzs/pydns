@@ -59,3 +59,7 @@ Managed by Django ORM
 ### QCLASSES
 - [ ] \*
 ** *
+
+## Support Development
+bitcoin:3JTF8urJ6qtTUg9GFgPYWHo3oQeTjabG2S  
+[YandexMoney/Visa/MasterCard](https://money.yandex.ru/to/410015353007315)
