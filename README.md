@@ -1,4 +1,4 @@
-# pydns
+# pydns [discontinued in favour of Neptune]
 ![PyDNS logo](http://i97.fastpic.ru/big/2018/1111/ed/47655d362332c1107205f800193acaed.png?noht=1)  
 
 Python DNS Server. Implementation of [IETF Domain Names](https://tools.ietf.org/html/rfc1035)
